@@ -1,0 +1,87 @@
+version: '3.8'
+
+services:
+  pocketbase:
+    image: pocketbase/pocketbase:latest
+    container_name: pocketbase
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    volumes:
+      - pocketbase-data:/pb/pb_data
+      - pocketbase-public:/pb/pb_public
+    command: serve --http=0.0.0.0:8090 --dir=/pb/pb_data --publicDir=/pb/pb_public
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  icm-agent:
+    build:
+      context: ./icm-agent
+      dockerfile: Dockerfile
+    container_name: icm-agent
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - ICM_AGENT_PORT=8001
+      - ICM_AGENT_HOST=0.0.0.0
+    volumes:
+      - ./icm-agent/app:/app
+      - ./init-scripts:/app/init-scripts
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  icm-bridge:
+    build:
+      context: ./icm-bridge
+      dockerfile: Dockerfile
+    container_name: icm-bridge
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ICM_BRIDGE_PORT=8000
+      - ICM_BRIDGE_HOST=0.0.0.0
+    volumes:
+      - ./icm-bridge:/app
+      - ./shared-data:/data
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./icm-agent/static:/usr/share/nginx/html/chat:ro
+    depends_on:
+      - icm-agent
+      - icm-bridge
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  pocketbase-data:
+  pocketbase-public:
